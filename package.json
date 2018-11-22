@@ -1,0 +1,43 @@
+{
+    "name": "degenesis-web-map",
+    "devDependencies": {
+        "autodll-webpack-plugin": "^0.3.9",
+        "babel-core": "^6.26.0",
+        "babel-loader": "^7.1.2",
+        "babel-preset-env": "^1.6.1",
+        "clean-webpack-plugin": "^0.1.18",
+        "eslint": "^4.17.0",
+        "extract-loader": "^1.0.2",
+        "file-loader": "^1.1.6",
+        "html-loader": "^0.5.5",
+        "style-loader": "^0.20.2",
+        "webpack": "^3.11.0",
+        "webpack-node-externals": "^1.6.0",
+        "css-loader": "^0.28.9",
+        "extract-text-webpack-plugin": "^3.0.2"
+    },
+    "scripts": {
+        "build": "webpack",
+        "build-loop": "webpack --watch --progress",
+        "lint": "eslint src/script"
+    },
+    "eslintConfig": {
+        "env": {
+            "browser": true,
+            "es6": true
+        },
+        "extends": "eslint:recommended",
+        "parserOptions": {
+            "sourceType": "module"
+        }
+    },
+    "dependencies": {
+        "@mapbox/mapbox-gl-draw": "github:mapbox/mapbox-gl-draw",
+        "@mapbox/mapbox-gl-geocoder": "^2.3.0",
+        "@turf/distance": "^6.0.1",
+        "babel-polyfill": "^6.26.0",
+        "gun": "^0.9.99996",
+        "mapbox-gl": "^0.50.0-beta.1",
+        "mapbox-gl-controls": "0.0.11"
+    }
+}

@@ -1,0 +1,440 @@
+#!/usr/bin/env lua5.2
+local encode_json = require'cjson'.encode
+local Color = require'Color'
+
+
+local function prop_gradient(base_value, base_zoom) -- TODO: Find a better name please :(
+    local function gen_stop_size(zoom, base_size)
+        return base_size * math.pow(2, zoom - base_zoom)
+    end
+
+    local function gen_stop(zoom)
+        local stop_value
+        if type(base_value) == 'table' then
+            stop_value = {}
+            for i, size in ipairs(base_value) do
+                stop_value[i] = gen_stop_size(zoom, size)
+            end
+        else
+            stop_value = gen_stop_size(zoom, base_value)
+        end
+        return {zoom, stop_value}
+    end
+
+    return {type = 'exponential',
+            base = 2,
+            stops = {gen_stop(0), gen_stop(24)}}
+end
+
+local function map(t, fn)
+    local r = {}
+    for k, v in pairs(t) do
+        r[k] = fn(v)
+    end
+    return r
+end
+
+local function ifelse(condition, true_value, false_value)
+    if condition then
+        return true_value
+    else
+        return false_value
+    end
+end
+
+local colors = {
+    black    = Color:from_string'#000000',
+    water    = Color:from_string'#615347',
+    wood     = Color:from_string'#6a5650',
+    grass    = Color:from_string'#786b5f',
+    sand     = Color:from_string'#7b6959',
+    stone    = Color:from_string'#6c6865',
+    building = Color:from_string'#615b58',
+    street   = Color:from_string'#a79f99',
+    wall     = Color:from_string'#3c3b3b',
+    rust     = Color:from_string'#715953',
+    night    = Color:from_string'#0B0E26'}
+
+local rail_width = 6
+
+local street_width = 2*10
+-- 10px entsprechen einer Fahrbahn
+-- Da nicht bekannt ist wie viele Fahrbahnen die Straße hat,
+-- wird einfach 2 als Approximation genutzt.
+local street_border_width = 1.5
+local street_inner_width = street_width - street_border_width
+
+local road_classes = {'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor', 'service', 'raceway'}
+local road_condition = {'in', 'class', table.unpack(road_classes)}
+local rail_classes = {'rail', 'transit', 'cable_car'}
+local rail_condition = {'in', 'class', table.unpack(rail_classes)}
+
+
+local sources = {}
+
+local source_mt = {
+    __index = function(self, k)
+        return {source_id = self._source_id,
+                layer_id  = k}
+    end
+}
+
+local function Source(o)
+    local id = assert(o.id)
+    o.id = nil
+    sources[id] = o
+    return setmetatable({_source_id = id}, source_mt)
+end
+
+local openmaptiles = Source{
+    id = 'openmaptiles',
+    type = 'vector',
+    url = 'https://maps.tilehosting.com/data/v3.json?key=xqooEUrYUcgsirAIo6Nm'
+}
+
+local hillshades = Source{
+    id = 'hillshades',
+    type = 'raster',
+    url = 'https://maps.tilehosting.com/data/hillshades.json?key=xqooEUrYUcgsirAIo6Nm'
+}
+
+
+local layers = {}
+
+local function add_layer(layer)
+    local source_layer = layer.source_layer
+    if source_layer then
+        layer.source_layer = nil
+
+        layer.source = source_layer.source_id
+        layer['source-layer'] = source_layer.layer_id
+    end
+
+    table.insert(layers, layer)
+end
+
+add_layer{
+    id = 'background',
+    type = 'background',
+    paint = {
+        ['background-color'] = colors.black
+    }
+}
+
+add_layer{
+    id = 'landuse',
+    type = 'fill',
+    source_layer = openmaptiles.landuse,
+    paint = {
+        ['fill-color'] = colors.stone
+    }
+}
+
+add_layer{
+    id = 'landcover-sand',
+    type = 'fill',
+    source_layer = openmaptiles.landcover,
+    filter = {'all', {'==', 'class', 'sand'}},
+    paint = {
+        ['fill-color'] = colors.sand
+    }
+}
+
+add_layer{
+    id = 'landcover-wood',
+    type = 'fill',
+    source_layer = openmaptiles.landcover,
+    filter = {'all', {'==', 'class', 'wood'}},
+    paint = {
+        ['fill-color'] = colors.wood
+    }
+}
+
+add_layer{
+    id = 'landcover-grass',
+    type = 'fill',
+    source_layer = openmaptiles.landcover,
+    filter = {'all', {'==', 'class', 'grass'}},
+    paint = {
+        ['fill-color'] = colors.grass
+    }
+}
+
+add_layer{
+    id = 'landcover-park',
+    type = 'fill',
+    source_layer = openmaptiles.park,
+    paint = {
+        ['fill-color'] = colors.grass
+    }
+}
+
+add_layer{
+    id = 'water-shadow',
+    type = 'fill',
+    source_layer = openmaptiles.water,
+    minzoom = 15,
+    paint = {
+        ['fill-translate-anchor'] = 'viewport',
+        ['fill-translate'] = prop_gradient({0, -2}, 17),
+        ['fill-color'] = colors.black,
+        ['fill-opacity'] = 0.4
+    }
+}
+
+add_layer{
+    id = 'water',
+    type = 'fill',
+    source_layer = openmaptiles.water,
+    paint = {
+        ['fill-color'] = colors.water,
+    }
+}
+
+add_layer{
+    id = 'tunnel-hint',
+    type = 'line',
+    source_layer = openmaptiles.transportation,
+    minzoom = 5,
+    filter = {'all', {'==', '$type', 'LineString'},
+                     {'==', 'brunnel', 'tunnel'}},
+    layout = {
+        ['line-cap']  = 'round'
+    },
+    paint = {
+        ['line-width'] = prop_gradient(street_width, 17),
+        ['line-blur']  = prop_gradient(street_width/3, 17),
+        ['line-color'] = colors.black,
+        ['line-opacity'] = 0.1
+    }
+}
+
+local function add_transport_layers(brunnel)
+    local prefix = ''
+    local condition = {'!has', 'brunnel'}
+    if brunnel then
+        prefix = brunnel..'-'
+        condition = {'==', 'brunnel', brunnel}
+    end
+
+    local round_cap = not brunnel
+    local invisible = brunnel == 'tunnel'
+
+    add_layer{
+        id = prefix..'road-border',
+        type = 'line',
+        source_layer = openmaptiles.transportation,
+        minzoom = 5,
+        filter = {'all', road_condition, condition},
+        layout = {
+            ['line-cap'] = ifelse(round_cap, 'round'),
+            visibility   = ifelse(invisible, 'none')
+        },
+        paint = {
+            ['line-gap-width'] = prop_gradient(street_inner_width, 17),
+            ['line-width'] = prop_gradient(street_border_width/2, 17),
+            ['line-color'] = colors.street
+        }
+    }
+
+    add_layer{
+        id = prefix..'road',
+        type = 'line',
+        source_layer = openmaptiles.transportation,
+        minzoom = 5,
+        filter = {'all', road_condition, condition},
+        layout = {
+            ['line-cap'] = ifelse(round_cap, 'round'),
+            visibility   = ifelse(invisible, 'none')
+        },
+        paint = {
+            ['line-color'] = colors.stone,
+            ['line-width'] = prop_gradient(street_inner_width, 17)
+        }
+    }
+
+    add_layer{
+        id = prefix..'rail-hatching',
+        type = 'line',
+        source_layer = openmaptiles.transportation,
+        minzoom = 5,
+        filter = {'all', rail_condition, condition},
+        layout = {
+            visibility = ifelse(invisible, 'none')
+        },
+        paint = {
+            ['line-color'] = colors.stone,
+            ['line-width'] = prop_gradient(rail_width*1.5, 17),
+            ['line-dasharray'] = {0.1, 2}
+        }
+    }
+
+    add_layer{
+        id = prefix..'rail',
+        type = 'line',
+        source_layer = openmaptiles.transportation,
+        minzoom = 5,
+        filter = {'all', rail_condition, condition},
+        layout = {
+            visibility = ifelse(invisible, 'none')
+        },
+        paint = {
+            ['line-gap-width'] = prop_gradient(rail_width, 17),
+            ['line-width'] = prop_gradient(1, 17),
+            ['line-color'] = colors.rust,
+        }
+    }
+end
+
+add_transport_layers()
+
+add_layer{
+    id = 'building',
+    type = 'fill',
+    source = 'openmaptiles',
+    source_layer = openmaptiles.building,
+    minzoom = 0,
+    maxzoom = 14,
+    paint = {
+        ['fill-color'] = colors.building,
+    }
+}
+
+add_layer{
+    id = 'building-3d',
+    type = 'fill-extrusion',
+    source = 'openmaptiles',
+    minzoom = 14,
+    source_layer = openmaptiles.building,
+    paint = {
+        ['fill-extrusion-color'] = colors.building,
+        ['fill-extrusion-height'] = {
+            property = 'render_height',
+            type = 'identity'
+        },
+        ['fill-extrusion-base'] = {
+            property = 'render_min_height',
+            type = 'identity'
+        }
+    }
+}
+
+add_layer{
+    id = 'bridge-shadow',
+    type = 'line',
+    source_layer = openmaptiles.transportation,
+    minzoom = 5,
+    filter = {'all', {'==', '$type', 'LineString'},
+                     {'==', 'brunnel', 'bridge'}},
+    paint = {
+        ['line-gap-width'] = prop_gradient(street_width, 17),
+        ['line-width'] = prop_gradient(2, 17),
+        ['line-blur']  = prop_gradient(2, 17),
+        ['line-color'] = colors.black,
+        ['line-opacity'] = 0.4
+    }
+}
+
+add_layer{
+    id = 'bridge',
+    type = 'line',
+    source_layer = openmaptiles.transportation,
+    minzoom = 5,
+    filter = {'all', {'==', '$type', 'LineString'},
+                     {'==', 'brunnel', 'bridge'},
+                     {'!in', 'class', table.unpack(road_classes)}},
+    paint = {
+        ['line-width'] = prop_gradient(street_width, 17),
+        ['line-color'] = colors.stone
+    }
+}
+
+add_transport_layers'bridge'
+
+add_layer{
+    id = 'hillshades',
+    type = 'raster',
+    source = 'hillshades',
+    maxzoom = 17,
+    paint = {
+        ['raster-opacity'] = {
+            stops = {{10, 0.6},
+                     {15, 0.2},
+                     {16, 0.2},
+                     {17, 0.0}}
+        }
+    }
+}
+
+
+-- tunnel overlay:
+
+add_layer{
+    id = 'tunnel-overlay',
+    type = 'background',
+    layout = {
+        visibility = 'none'
+    },
+    paint = {
+        ['background-color'] = colors.night,
+        ['background-opacity'] = 0.8
+    }
+}
+
+add_layer{
+    id = 'tunnel-ground',
+    type = 'line',
+    source_layer = openmaptiles.transportation,
+    minzoom = 5,
+    filter = {'all', {'==', '$type', 'LineString'},
+                     {'==', 'brunnel', 'tunnel'}},
+    layout = {
+        visibility = 'none'
+    },
+    paint = {
+        ['line-width'] = prop_gradient(street_width*2, 17),
+        ['line-blur']  = prop_gradient(street_width, 17),
+        ['line-color'] = colors.black
+    }
+}
+
+add_transport_layers'tunnel'
+
+
+local style = {
+    version = 8,
+    name = 'Degenesis',
+    metadata = {
+        ['mapbox:autocomposite'] = false,
+        ['mapbox:type'] = 'template',
+        ['maputnik:renderer'] = 'mbgljs',
+        ['openmaptiles:version'] = '3.x'
+    },
+    sources = sources,
+    glyphs  = 'https://demo.tileserver.org/fonts/{fontstack}/{range}.pbf',
+    sprites = 'https://demo.tileserver.org/fonts/{fontstack}/{range}.pbf',
+    layers = layers
+}
+
+local function recursive_map(t, fn)
+    local r = {}
+    for k, v in pairs(t) do
+        if type(v) == 'table' and not getmetatable(v) then
+            v = recursive_map(v, fn)
+        else
+            v = fn(v)
+        end
+        r[k] = v
+    end
+    return r
+end
+
+style = recursive_map(style, function(v)
+    if type(v) == 'table' and getmetatable(v) then
+        return tostring(v)
+    else
+        return v
+    end
+end)
+
+print(encode_json(style))

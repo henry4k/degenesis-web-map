@@ -1,0 +1,13 @@
+class: landcover
+- sand x
+- wood x
+- grass x
+- wetland
+- farmland (wie grass nur mit umrandung?)
+- ice
+  - glacier
+
+class: aeroway
+- taxiway
+- runway
+- ???
